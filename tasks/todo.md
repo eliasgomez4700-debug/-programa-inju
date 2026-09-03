@@ -55,3 +55,25 @@ Plan: `plan.md`
 - [x] Build y lint pasan.
 - [ ] Flujo end-to-end verificado manualmente (requiere ejecutar el Cierre contra la BD real — pendiente de aprobación).
 - [x] Revisión de calidad (code-review): aprobada sin issues críticos.
+
+---
+
+# Despliegue en Render
+
+Plan detallado: `render-deploy.md`
+Lista de verificación: `render-deploy-todo.md`
+
+## Fase 1: Código
+- [x] Backend sirve frontend estático
+- [x] Scripts de build/start configurados
+- [x] render.yaml creado
+
+## Fase 2: Configuración Render
+- [ ] Conectar repositorio GitHub
+- [ ] Configurar Web Service
+- [ ] Configurar Variables de Entorno
+- [ ] Primer deploy
+
+## Fase 3: Verificación
+- [ ] App funciona en Render
+- [ ] Conexión a BD Railway
