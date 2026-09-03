@@ -1,0 +1,16 @@
+{
+  "name": "programa-inju",
+  "version": "1.0.0",
+  "description": "Sistema de Control de Notas - INJU",
+  "scripts": {
+    "backend": "npm run dev --prefix backend",
+    "frontend": "npm run dev --prefix frontend",
+    "dev": "concurrently \"npm run backend\" \"npm run frontend\"",
+    "db:init": "npm run db:init --prefix backend",
+    "build": "npm run build --prefix frontend",
+    "install:all": "npm install --prefix backend && npm install --prefix frontend"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2"
+  }
+}
