@@ -1,7 +1,11 @@
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
+import path from 'path';
+import { fileURLToPath } from 'url';
 dotenv.config();
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 import authRoutes from './routes/auth.routes.js';
 import userRoutes from './routes/user.routes.js';
@@ -72,6 +76,11 @@ app.use('/api/attitude-reports', attitudeReportRoutes);
 app.use('/api/recovery-grades', recoveryRoutes);
 app.use('/api/system', systemRoutes);
 app.use('/api/reprobados', reprobadoRoutes);
+
+app.use(express.static(path.join(__dirname, '../frontend/dist')));
+app.get('/{*path}', (req, res) => {
+  res.sendFile(path.join(__dirname, '../frontend/dist/index.html'));
+});
 
 app.use((err, req, res, next) => {
   console.error(err.stack);
