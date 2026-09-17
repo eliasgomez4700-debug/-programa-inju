@@ -28,20 +28,47 @@ import reprobadoRoutes from './routes/reprobado.routes.js';
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+app.set('trust proxy', process.env.NODE_ENV === 'production' ? 1 : false);
+
 const rateLimitStore = new Map();
-function rateLimit({ windowMs = 60000, max = 100 } = {}) {
+
+function apiRateLimit({ windowMs = 60000, max = 100 } = {}) {
   return (req, res, next) => {
     const key = req.ip;
     const now = Date.now();
     const entry = rateLimitStore.get(key);
     if (!entry || now - entry.start > windowMs) {
-      rateLimitStore.set(key, { start: now, count: 1 });
+      rateLimitStore.set(key, { start: now, count: 1, windowMs });
       return next();
     }
     entry.count++;
     if (entry.count > max) {
       return res.status(429).json({ message: 'Demasiadas solicitudes. Intente más tarde.' });
     }
+    next();
+  };
+}
+
+function loginRateLimit({ windowMs = 15 * 60 * 1000, max = 10 } = {}) {
+  return (req, res, next) => {
+    const key = `${req.ip}:${(req.body?.email || '').toLowerCase().trim()}`;
+    const now = Date.now();
+    let entry = rateLimitStore.get(key);
+    if (!entry || now - entry.start > windowMs) {
+      entry = { start: now, count: 0, windowMs };
+      rateLimitStore.set(key, entry);
+    }
+    const sendJson = res.json.bind(res);
+    res.json = (body) => {
+      if (res.statusCode >= 400) {
+        entry.count++;
+        if (entry.count > max) {
+          res.statusCode = 429;
+          return sendJson({ message: 'Demasiadas solicitudes. Intente más tarde.' });
+        }
+      }
+      return sendJson(body);
+    };
     next();
   };
 }
@@ -53,8 +80,8 @@ app.use(cors({
 }));
 app.use(express.json({ limit: '1mb' }));
 
-const loginLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 10 });
-const apiLimiter = rateLimit({ windowMs: 1 * 60 * 1000, max: 120 });
+const loginLimiter = loginRateLimit({ windowMs: 15 * 60 * 1000, max: 10 });
+const apiLimiter = apiRateLimit({ windowMs: 1 * 60 * 1000, max: 120 });
 
 app.use('/api/auth/login', loginLimiter);
 app.use('/api', apiLimiter);
@@ -90,9 +117,9 @@ app.use((err, req, res, next) => {
 setInterval(() => {
   const now = Date.now();
   for (const [key, entry] of rateLimitStore) {
-    if (now - entry.start > 120000) rateLimitStore.delete(key);
+    if (now - entry.start > entry.windowMs) rateLimitStore.delete(key);
   }
-}, 120000);
+}, 60000);
 
 app.listen(PORT, () => {
   console.log(`Servidor corriendo en puerto ${PORT}`);
