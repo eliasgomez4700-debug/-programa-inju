@@ -1,52 +1,43 @@
-# Implementation Plan: Apartado Alumnos Reprobados
+# Implementation Plan: Cuadrícula de Carga Masiva de Notas
 
 ## Overview
 
-Agregar el apartado **Alumnos Reprobados** al sistema INJU. Al ejecutar el Cierre del Sistema, cada alumno activo con promedio final < 6.0 queda registrado en una nueva tabla `reprobados` y **repite el grado** (no es promovido, permanece en el mismo grado/sección). Se añade una página React con la lista histórica por año académico, filtros y borrado manual para director/subdirector.
+Reemplazar el ingreso alumno por alumno en el apartado Notas por una cuadrícula general con todos los alumnos de la sección: celdas editables para Nota1/Nota2/Nota3/Rec/Ref, promedio calculado en vivo, y un guardado en lote único.
 
-Especificación: `SPEC-alumnos-reprobados.md`.
+Especificación: `SPEC-cuadricula-notas.md`.
 
 ## Architecture Decisions
 
-1. **Cálculo del promedio reutilizado** — Extraer la lógica de cálculo del promedio final (que hoy vive en `calculateFinalAverage` de `grade.controller.js`) a un utilitario compartido `utils/finalAverage.js`, para que el cierre lo reutilice sin duplicar código.
-2. **Nueva tabla `reprobados`** — Registro por alumno y año académico (clave única `student_id + academic_year_id`), guardando grado, sección y promedio final en el momento del cierre. No modifica las tablas existentes.
-3. **Integración transaccional en el cierre** — Dentro de la transacción existente de `closeSystem`, se agrega una rama "reprobado". Los aprobados conservan su comportamiento actual (promovido/egresado).
-4. **Backward compatible** — Si no hay notas registradas para un alumno, se considera reprobado con promedio 0 (el director puede eliminarlo/corregirlo desde el apartado).
+1. **Fórmula compartida** — Extraer la fórmula de promedio (35/35/30 + override de recuperación) a `backend/utils/gradeAverage.js` para que el endpoint individual y el batch no la dupliquen.
+2. **Endpoint batch con upsert** — `POST /api/grades/batch` inserta o actualiza por clave única (student_id, subject_id, period_id). Los registros sin ningún valor en las 5 columnas se ignoran: un campo vacío no sobrescribe datos existentes.
+3. **Cuadrícula reutiliza el GET de alumnos** — Se mantiene el filtrado actual (año, periodo, materia, sección) y se enriquece cada fila con la nota existente si la hay.
+4. **Backward compatible** — El formulario individual (editar/nuevo alumno) permanece intacto.
 
 ## Task List
 
-### Phase 1: Base de datos
-- [ ] Task 1: Agregar tabla `reprobados` a `backend/db/init.js`
+### Phase 1: Backend - fórmula compartida
+- [ ] Task A: Crear `backend/utils/gradeAverage.js` (fórmula extraída) y delegar en `createOrUpdateGrade`
 
-### Phase 2: Backend - utilitario y endpoints
-- [ ] Task 2: Crear utilitario `backend/utils/finalAverage.js` (extraído del cálculo de `grade.controller.js`)
-- [ ] Task 3: Crear `backend/controllers/reprobado.controller.js` (GET lista + DELETE)
-- [ ] Task 4: Crear `backend/routes/reprobado.routes.js` y montarla en `server.js`
+### Phase 2: Backend - endpoint de lote
+- [ ] Task B: `createOrUpdateGradesBatch` + ruta `POST /api/grades/batch`
 
-### Checkpoint: Backend base listo
-- [ ] La tabla se crea con `db:init`, los endpoints responden con los roles correctos.
+### Checkpoint: Backend
+- [ ] Upsert funciona con roles correctos; 401/400 verificados.
 
-### Phase 3: Backend - integración con el cierre
-- [ ] Task 5: Modificar `closeSystem` para detectar reprobados, no promoverlos y registrarlos
-
-### Checkpoint: Cierre
-- [ ] Al cerrar, un alumno con promedio < 6 queda reprobado (no promovido) y registrado.
-
-### Phase 4: Frontend
-- [ ] Task 6: Crear página `frontend/src/pages/AlumnosReprobados.jsx` (lista + filtros + eliminar)
-- [ ] Task 7: Agregar ruta en `App.jsx` y enlace en `Sidebar.jsx`
+### Phase 3: Frontend - cuadrícula editable
+- [ ] Task C: Cuadrícula general en `frontend/src/pages/Grades.jsx` con guardado en lote
 
 ### Checkpoint: Completo
-- [ ] Build y lint pasan; flujo end-to-end verificado manualmente.
+- [ ] Build y lint pasan; flujo e2e verificado.
 
 ## Risks and Mitigations
 
 | Risk | Impact | Mitigation |
 |------|--------|------------|
-| Extraer el cálculo de promedio rompe `calculateFinalAverage` | Med | Refactorizar con cuidado y probar el endpoint existente tras el cambio |
-| Cierre con muchos alumnos puede ser lento (cálculo por alumno) | Bajo | Se mantiene dentro de la transacción existente; el usuario aceptó el modo directo automático |
-| Caso "sin notas": alumno se marca reprobado con 0 | Bajo | Documentado; el director puede eliminar/corregir desde el apartado |
+| Extraer la fórmula rompe el promedio actual | Med | Refactorizar y comparar resultado con el cálculo previo sin cambios de comportamiento |
+| Cuadrícula grande lenta | Bajo | Solo se renderiza bajo filtros de periodo+materia+sección; sin paginación si la sección es pequeña |
+| Guardado vacío borra notas | Med | Los registros sin valores se descartan en backend antes del upsert |
 
 ## Open Questions
 
-- Ninguna pendiente (decisiones aprobadas en `SPEC-alumnos-reprobados.md`).
+- Ninguna pendiente.

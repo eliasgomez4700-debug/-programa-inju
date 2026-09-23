@@ -20,6 +20,9 @@ export default function Grades() {
   const [gradeForm, setGradeForm] = useState({ nota1: '', nota2: '', nota3: '', recuperacion: '', refuerzo: '' });
   const [editing, setEditing] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [gridRows, setGridRows] = useState([]);
+  const [gridLoading, setGridLoading] = useState(false);
+  const [gridSaving, setGridSaving] = useState(false);
 
   useEffect(() => {
     const params = {};
@@ -56,6 +59,73 @@ export default function Grades() {
       setGrades(res.data);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const gridReady = selectedPeriod && selectedSubject && selectedSection;
+
+  const loadGrid = async () => {
+    if (!gridReady) {
+      alert('Selecciona periodo, materia y sección para cargar la cuadrícula');
+      return;
+    }
+    setGridLoading(true);
+    try {
+      const teacher = isTeacher ? { teacher_id: user.id } : {};
+      const [studentsRes, gradesRes] = await Promise.all([
+        API.get('/students', { params: { seccion_id: selectedSection, ...teacher } }),
+        API.get('/grades', { params: { period_id: selectedPeriod, subject_id: selectedSubject, seccion_id: selectedSection, ...teacher } }),
+      ]);
+      const gradeMap = new Map(gradesRes.data.map(g => [g.student_id, g]));
+      setGridRows(studentsRes.data.map(st => {
+        const g = gradeMap.get(st.id);
+        return {
+          student_id: st.id,
+          nombre: st.nombre,
+          apellido: st.apellido,
+          nota1: g?.nota1 ?? '',
+          nota2: g?.nota2 ?? '',
+          nota3: g?.nota3 ?? '',
+          recuperacion: g?.recuperacion ?? '',
+          refuerzo: g?.refuerzo ?? '',
+        };
+      }));
+    } catch (err) {
+      alert(err.response?.data?.message || 'Error al cargar la cuadrícula');
+    } finally {
+      setGridLoading(false);
+    }
+  };
+
+  const handleCellChange = (studentId, field, value) => {
+    setGridRows(rows => rows.map(r => r.student_id === studentId ? { ...r, [field]: value } : r));
+  };
+
+  const handleGridSave = async () => {
+    if (!gridReady) return;
+    const records = gridRows.map(r => {
+      const values = { nota1: r.nota1, nota2: r.nota2, nota3: r.nota3, recuperacion: r.recuperacion, refuerzo: r.refuerzo };
+      if (Object.values(values).every(v => v === '' || v === null || v === undefined)) return null;
+      return {
+        student_id: r.student_id,
+        subject_id: parseInt(selectedSubject),
+        period_id: parseInt(selectedPeriod),
+        ...values,
+      };
+    }).filter(Boolean);
+    if (records.length === 0) {
+      alert('No hay notas para guardar');
+      return;
+    }
+    setGridSaving(true);
+    try {
+      const res = await API.post('/grades/batch', { registros: records });
+      alert(res.data.message);
+      await Promise.all([loadGrid(), loadGrades()]);
+    } catch (err) {
+      alert(err.response?.data?.message || 'Error al guardar las notas');
+    } finally {
+      setGridSaving(false);
     }
   };
 
@@ -126,15 +196,15 @@ export default function Grades() {
           <option value="">Seleccionar Año</option>
           {years.map(y => <option key={y.id} value={y.id}>{y.año}</option>)}
         </select>
-        <select value={selectedPeriod} onChange={e => setSelectedPeriod(e.target.value)}>
+        <select value={selectedPeriod} onChange={e => { setSelectedPeriod(e.target.value); setGridRows([]); }}>
           <option value="">Todos los periodos</option>
           {periods.map(p => <option key={p.id} value={p.id}>{p.nombre}</option>)}
         </select>
-        <select value={selectedSubject} onChange={e => setSelectedSubject(e.target.value)} disabled={isTeacher && subjects.length === 0}>
+        <select value={selectedSubject} onChange={e => { setSelectedSubject(e.target.value); setGridRows([]); }} disabled={isTeacher && subjects.length === 0}>
           <option value="">{isTeacher ? 'Mis materias' : 'Todas las materias'}</option>
           {subjects.map(s => <option key={s.id} value={s.id}>{s.nombre}</option>)}
         </select>
-        <select value={selectedSection} onChange={e => setSelectedSection(e.target.value)} disabled={sections.length <= 1}>
+        <select value={selectedSection} onChange={e => { setSelectedSection(e.target.value); setGridRows([]); }} disabled={sections.length <= 1}>
           <option value="">{isTeacher ? 'Mis secciones' : 'Todas las secciones'}</option>
           {sections.map(s => <option key={s.id} value={s.id}>{s.nombre}</option>)}
         </select>
@@ -146,6 +216,69 @@ export default function Grades() {
         <button className="btn btn-secondary" onClick={() => window.print()} disabled={!grades.length}>
           Imprimir
         </button>
+      </div>
+
+      <div className="card">
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.5rem' }}>
+          <h3 style={{ margin: 0 }}>Cuadrícula de notas</h3>
+          <div style={{ display: 'flex', gap: '0.5rem' }}>
+            <button className="btn btn-secondary" onClick={loadGrid} disabled={gridLoading || gridSaving}>
+              {gridLoading ? 'Cargando...' : 'Cargar cuadrícula'}
+            </button>
+            <button className="btn btn-primary" onClick={handleGridSave} disabled={gridSaving || gridLoading || gridRows.length === 0}>
+              {gridSaving ? 'Guardando...' : 'Guardar cuadrícula'}
+            </button>
+          </div>
+        </div>
+        {!gridReady ? (
+          <p style={{ color: 'var(--text-light)', marginTop: '0.5rem' }}>Selecciona periodo, materia y sección, y presiona "Cargar cuadrícula" para editar las notas de todos los alumnos a la vez.</p>
+        ) : (
+          <div className="table-container" style={{ marginTop: '0.75rem' }}>
+            {gridRows.length === 0 ? (
+              <div style={{ textAlign: 'center', color: 'var(--text-light)', padding: '1rem 0' }}>
+                {gridLoading ? 'Cargando alumnos...' : 'Sin alumnos en esta sección. Presiona "Cargar cuadrícula".'}
+              </div>
+            ) : (
+              <table>
+                <thead>
+                  <tr>
+                    <th>#</th>
+                    <th>Alumno</th>
+                    <th>Nota 1</th>
+                    <th>Nota 2</th>
+                    <th>Nota 3</th>
+                    <th>Rec</th>
+                    <th>Ref</th>
+                    <th>Promedio</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {gridRows.map((row, i) => (
+                    <tr key={row.student_id}>
+                      <td>{i + 1}</td>
+                      <td>{row.apellido} {row.nombre}</td>
+                      {['nota1', 'nota2', 'nota3', 'recuperacion', 'refuerzo'].map(field => (
+                        <td key={field}>
+                          <input
+                            type="number"
+                            step="0.01"
+                            min="0"
+                            max="10"
+                            style={{ width: '4.5rem' }}
+                            aria-label={`${row.apellido} ${row.nombre} ${field}`}
+                            value={row[field]}
+                            onChange={e => handleCellChange(row.student_id, field, e.target.value)}
+                          />
+                        </td>
+                      ))}
+                      <td><strong>{calculatePromedio(row.nota1, row.nota2, row.nota3, row.recuperacion, row.refuerzo)}</strong></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
+        )}
       </div>
 
       {editing && (

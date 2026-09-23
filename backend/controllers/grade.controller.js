@@ -1,5 +1,6 @@
 import pool from '../config/db.js';
 import { computeFinalAverage } from '../utils/finalAverage.js';
+import { computeGradeAverage } from '../utils/gradeAverage.js';
 
 const calculatePPForReport = async (student_id, subject_id, academic_year_id) => {
   const [periods] = await pool.query(
@@ -128,20 +129,7 @@ export const createOrUpdateGrade = async (req, res, next) => {
     const rec = parseFloat(recuperacion) || 0;
     const ref = parseFloat(refuerzo) || 0;
 
-    const promedioRegular = (n1 * 0.35) + (n2 * 0.35) + (n3 * 0.30);
-    let promedio;
-    if (promedioRegular >= 6) {
-      promedio = parseFloat(promedioRegular.toFixed(2));
-    } else if (rec > 0 || ref > 0) {
-      const notaRec = (rec + ref) / 2;
-      if (notaRec >= 6) {
-        promedio = 6;
-      } else {
-        promedio = parseFloat(notaRec.toFixed(2));
-      }
-    } else {
-      promedio = parseFloat(promedioRegular.toFixed(2));
-    }
+    const promedio = computeGradeAverage(n1, n2, n3, rec, ref);
 
     const [existing] = await pool.query(
       'SELECT id FROM grades WHERE student_id = ? AND subject_id = ? AND period_id = ?',
@@ -161,6 +149,73 @@ export const createOrUpdateGrade = async (req, res, next) => {
       );
       res.status(201).json({ id: result.insertId, student_id, subject_id, period_id, nota1: n1, nota2: n2, nota3: n3, recuperacion: rec, refuerzo: ref, promedio, message: 'Nota creada correctamente' });
     }
+  } catch (err) {
+    next(err);
+  }
+};
+
+export const createOrUpdateGradesBatch = async (req, res, next) => {
+  try {
+    const { registros } = req.body;
+    if (!Array.isArray(registros)) {
+      return res.status(400).json({ message: 'registros debe ser un arreglo' });
+    }
+
+    const fieldNames = ['nota1', 'nota2', 'nota3', 'recuperacion', 'refuerzo'];
+    let guardados = 0;
+    let ignorados = 0;
+
+    for (const reg of registros) {
+      const studentId = parseInt(reg.student_id);
+      const subjectId = parseInt(reg.subject_id);
+      const periodId = parseInt(reg.period_id);
+      if (!studentId || !subjectId || !periodId) continue;
+
+      const hasValue = fieldNames.some(f => {
+        const v = reg[f];
+        return v !== undefined && v !== null && v !== '';
+      });
+      if (!hasValue) {
+        ignorados++;
+        continue;
+      }
+
+      const [existing] = await pool.query(
+        'SELECT id, nota1, nota2, nota3, recuperacion, refuerzo FROM grades WHERE student_id = ? AND subject_id = ? AND period_id = ?',
+        [studentId, subjectId, periodId]
+      );
+
+      if (existing.length > 0) {
+        const current = existing[0];
+        const merged = {};
+        for (const f of fieldNames) {
+          const v = reg[f];
+          merged[f] = (v !== undefined && v !== null && v !== '')
+            ? parseFloat(reg[f]) || 0
+            : parseFloat(current[f]) || 0;
+        }
+        const promedio = computeGradeAverage(merged.nota1, merged.nota2, merged.nota3, merged.recuperacion, merged.refuerzo);
+        await pool.query(
+          'UPDATE grades SET nota1 = ?, nota2 = ?, nota3 = ?, recuperacion = ?, refuerzo = ?, promedio = ? WHERE id = ?',
+          [merged.nota1, merged.nota2, merged.nota3, merged.recuperacion, merged.refuerzo, promedio, current.id]
+        );
+        guardados++;
+      } else {
+        const values = {};
+        for (const f of fieldNames) {
+          const v = reg[f];
+          values[f] = (v !== undefined && v !== null && v !== '') ? parseFloat(reg[f]) || 0 : 0;
+        }
+        const promedio = computeGradeAverage(values.nota1, values.nota2, values.nota3, values.recuperacion, values.refuerzo);
+        await pool.query(
+          'INSERT INTO grades (student_id, subject_id, period_id, nota1, nota2, nota3, recuperacion, refuerzo, promedio) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+          [studentId, subjectId, periodId, values.nota1, values.nota2, values.nota3, values.recuperacion, values.refuerzo, promedio]
+        );
+        guardados++;
+      }
+    }
+
+    res.json({ message: `Se guardaron ${guardados} notas correctamente`, guardados, ignorados });
   } catch (err) {
     next(err);
   }
