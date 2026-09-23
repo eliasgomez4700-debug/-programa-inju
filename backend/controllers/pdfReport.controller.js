@@ -2,6 +2,7 @@ import pool from '../config/db.js';
 import PDFDocument from 'pdfkit';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { computeReportNF } from '../utils/reportNF.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -390,7 +391,7 @@ export const generateStudentPDF = async (req, res, next) => {
 
       const validGrades = [p1, p2, p3, p4].filter(v => v !== null);
       const niVal = validGrades.length > 0 ? (validGrades.reduce((a, b) => a + b, 0) / validGrades.length).toFixed(1) : '-';
-      const nfVal = validGrades.length > 0 ? Math.round(validGrades.reduce((a, b) => a + b, 0) / validGrades.length) : '-';
+      const nfVal = computeReportNF([p1, p2, p3, p4]);
 
       xAcc = startX;
       drawCell(xAcc, currentY, colW.materia, 15, sub.nombre.toUpperCase(), { fontSize: 7 }); xAcc += colW.materia;
@@ -478,7 +479,7 @@ export const generateStudentPDF = async (req, res, next) => {
         const p1 = toNum(p1G), p2 = toNum(p2G), p3 = toNum(p3G), p4 = toNum(p4G);
         const validGrades = [p1, p2, p3, p4].filter(v => v !== null);
         const niVal = validGrades.length > 0 ? (validGrades.reduce((a, b) => a + b, 0) / validGrades.length).toFixed(1) : '-';
-        const nfVal = validGrades.length > 0 ? Math.round(validGrades.reduce((a, b) => a + b, 0) / validGrades.length) : '-';
+        const nfVal = computeReportNF([p1, p2, p3, p4]);
 
         xAcc = startX;
         drawCell(xAcc, currentY, colW.materia, 15, sub.nombre.toUpperCase(), { fontSize: 7 }); xAcc += colW.materia;
