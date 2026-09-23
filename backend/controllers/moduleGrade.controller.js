@@ -1,16 +1,5 @@
 import pool from '../config/db.js';
-
-const obtenerNivelLogro = (notaFinal) => {
-  if (notaFinal >= 9.0) return 5;
-  if (notaFinal >= 7.0) return 4;
-  if (notaFinal >= 5.0) return 3;
-  if (notaFinal >= 3.0) return 2;
-  return 1;
-};
-
-const calcularPromedioFase = (n1, n2, n3) => {
-  return ((parseFloat(n1) || 0) + (parseFloat(n2) || 0) + (parseFloat(n3) || 0)) / 3;
-};
+import { computeModuleGrade } from '../utils/moduleGradeAverage.js';
 
 export const getModuleGrades = async (req, res, next) => {
   try {
@@ -64,22 +53,19 @@ export const createOrUpdateModuleGrade = async (req, res, next) => {
       return res.status(400).json({ message: 'student_id, subject_id y academic_year_id son requeridos' });
     }
 
-    const pn1 = parseFloat(preparacion_nota1) || 0;
-    const pn2 = parseFloat(preparacion_nota2) || 0;
-    const pn3 = parseFloat(preparacion_nota3) || 0;
-    const en1 = parseFloat(ejecucion_nota1) || 0;
-    const en2 = parseFloat(ejecucion_nota2) || 0;
-    const en3 = parseFloat(ejecucion_nota3) || 0;
-    const en1v = parseFloat(evaluacion_nota1) || 0;
-    const en2v = parseFloat(evaluacion_nota2) || 0;
-    const en3v = parseFloat(evaluacion_nota3) || 0;
+    const values = {
+      preparacion_nota1: parseFloat(preparacion_nota1) || 0,
+      preparacion_nota2: parseFloat(preparacion_nota2) || 0,
+      preparacion_nota3: parseFloat(preparacion_nota3) || 0,
+      ejecucion_nota1: parseFloat(ejecucion_nota1) || 0,
+      ejecucion_nota2: parseFloat(ejecucion_nota2) || 0,
+      ejecucion_nota3: parseFloat(ejecucion_nota3) || 0,
+      evaluacion_nota1: parseFloat(evaluacion_nota1) || 0,
+      evaluacion_nota2: parseFloat(evaluacion_nota2) || 0,
+      evaluacion_nota3: parseFloat(evaluacion_nota3) || 0,
+    };
 
-    const promPreparacion = calcularPromedioFase(pn1, pn2, pn3);
-    const promEjecucion = calcularPromedioFase(en1, en2, en3);
-    const promEvaluacion = calcularPromedioFase(en1v, en2v, en3v);
-
-    const promedio = parseFloat((promPreparacion * 0.25 + promEjecucion * 0.50 + promEvaluacion * 0.25).toFixed(2));
-    const nivelLogro = obtenerNivelLogro(promedio);
+    const { promedio, nivel_logro } = computeModuleGrade(values);
 
     const [existing] = await pool.query(
       'SELECT id FROM module_grades WHERE student_id = ? AND subject_id = ? AND academic_year_id = ?',
@@ -87,10 +73,10 @@ export const createOrUpdateModuleGrade = async (req, res, next) => {
     );
 
     const cols = [
-      preparacion_nota1, preparacion_nota2, preparacion_nota3,
-      ejecucion_nota1, ejecucion_nota2, ejecucion_nota3,
-      evaluacion_nota1, evaluacion_nota2, evaluacion_nota3,
-      promedio, nivelLogro
+      values.preparacion_nota1, values.preparacion_nota2, values.preparacion_nota3,
+      values.ejecucion_nota1, values.ejecucion_nota2, values.ejecucion_nota3,
+      values.evaluacion_nota1, values.evaluacion_nota2, values.evaluacion_nota3,
+      promedio, nivel_logro
     ];
 
     if (existing.length > 0) {
@@ -102,7 +88,7 @@ export const createOrUpdateModuleGrade = async (req, res, next) => {
          promedio = ?, nivel_logro = ? WHERE id = ?`,
         [...cols, existing[0].id]
       );
-      res.json({ id: existing[0].id, promedio, nivel_logro: nivelLogro, message: 'Nota de módulo actualizada correctamente' });
+      res.json({ id: existing[0].id, promedio, nivel_logro, message: 'Nota de módulo actualizada correctamente' });
     } else {
       const [result] = await pool.query(
         `INSERT INTO module_grades 
@@ -116,6 +102,71 @@ export const createOrUpdateModuleGrade = async (req, res, next) => {
       );
       res.status(201).json({ id: result.insertId, promedio, nivel_logro: nivelLogro, message: 'Nota de módulo creada correctamente' });
     }
+  } catch (err) {
+    next(err);
+  }
+};
+
+export const createOrUpdateModuleGradesBatch = async (req, res, next) => {
+  try {
+    const { registros } = req.body;
+    if (!Array.isArray(registros)) {
+      return res.status(400).json({ message: 'registros debe ser un arreglo' });
+    }
+
+    const fieldNames = [
+      'preparacion_nota1', 'preparacion_nota2', 'preparacion_nota3',
+      'ejecucion_nota1', 'ejecucion_nota2', 'ejecucion_nota3',
+      'evaluacion_nota1', 'evaluacion_nota2', 'evaluacion_nota3'
+    ];
+    let guardados = 0;
+    let ignorados = 0;
+
+    for (const reg of registros) {
+      const studentId = parseInt(reg.student_id);
+      const subjectId = parseInt(reg.subject_id);
+      const academicYearId = parseInt(reg.academic_year_id);
+      if (!studentId || !subjectId || !academicYearId) continue;
+
+      const hasValue = fieldNames.some(f => {
+        const v = reg[f];
+        return v !== undefined && v !== null && v !== '';
+      });
+      if (!hasValue) {
+        ignorados++;
+        continue;
+      }
+
+      const [existing] = await pool.query(
+        `SELECT id, ${fieldNames.join(', ')} FROM module_grades WHERE student_id = ? AND subject_id = ? AND academic_year_id = ?`,
+        [studentId, subjectId, academicYearId]
+      );
+
+      const merged = {};
+      for (const f of fieldNames) {
+        const v = reg[f];
+        merged[f] = (v !== undefined && v !== null && v !== '')
+          ? (parseFloat(reg[f]) || 0)
+          : (existing.length > 0 ? (parseFloat(existing[0][f]) || 0) : 0);
+      }
+      const { promedio, nivel_logro } = computeModuleGrade(merged);
+
+      if (existing.length > 0) {
+        await pool.query(
+          `UPDATE module_grades SET ${fieldNames.map(f => `${f} = ?`).join(', ')}, promedio = ?, nivel_logro = ? WHERE id = ?`,
+          [...fieldNames.map(f => merged[f]), promedio, nivel_logro, existing[0].id]
+        );
+        guardados++;
+      } else {
+        await pool.query(
+          `INSERT INTO module_grades (student_id, subject_id, academic_year_id, ${fieldNames.join(', ')}, promedio, nivel_logro) VALUES (?, ?, ?, ${fieldNames.map(() => '?').join(', ')}, ?, ?)`,
+          [studentId, subjectId, academicYearId, ...fieldNames.map(f => merged[f]), promedio, nivel_logro]
+        );
+        guardados++;
+      }
+    }
+
+    res.json({ message: `Se guardaron ${guardados} notas de módulo correctamente`, guardados, ignorados });
   } catch (err) {
     next(err);
   }

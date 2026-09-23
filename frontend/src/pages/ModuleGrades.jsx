@@ -30,6 +30,9 @@ export default function ModuleGrades() {
   });
   const [editing, setEditing] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [gridRows, setGridRows] = useState([]);
+  const [gridLoading, setGridLoading] = useState(false);
+  const [gridSaving, setGridSaving] = useState(false);
 
   useEffect(() => {
     const params = {};
@@ -60,6 +63,89 @@ export default function ModuleGrades() {
       setGrades(res.data);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const gridReady = selectedYear && selectedSubject && selectedSection;
+
+  const loadGrid = async () => {
+    if (!gridReady) {
+      alert('Selecciona año académico, materia de módulo y sección para cargar la cuadrícula');
+      return;
+    }
+    setGridLoading(true);
+    try {
+      const teacher = isTeacher ? { teacher_id: user.id } : {};
+      const [studentsRes, gradesRes] = await Promise.all([
+        API.get('/students', { params: { seccion_id: selectedSection, ...teacher } }),
+        API.get('/module-grades', { params: { academic_year_id: selectedYear, subject_id: selectedSubject, seccion_id: selectedSection, ...teacher } }),
+      ]);
+      const gradeMap = new Map(gradesRes.data.map(g => [g.student_id, g]));
+      setGridRows(studentsRes.data.map(st => {
+        const g = gradeMap.get(st.id);
+        return {
+          student_id: st.id,
+          nombre: st.nombre,
+          apellido: st.apellido,
+          preparacion_nota1: g?.preparacion_nota1 ?? '',
+          preparacion_nota2: g?.preparacion_nota2 ?? '',
+          preparacion_nota3: g?.preparacion_nota3 ?? '',
+          ejecucion_nota1: g?.ejecucion_nota1 ?? '',
+          ejecucion_nota2: g?.ejecucion_nota2 ?? '',
+          ejecucion_nota3: g?.ejecucion_nota3 ?? '',
+          evaluacion_nota1: g?.evaluacion_nota1 ?? '',
+          evaluacion_nota2: g?.evaluacion_nota2 ?? '',
+          evaluacion_nota3: g?.evaluacion_nota3 ?? '',
+        };
+      }));
+    } catch (err) {
+      alert(err.response?.data?.message || 'Error al cargar la cuadrícula');
+    } finally {
+      setGridLoading(false);
+    }
+  };
+
+  const handleCellChange = (studentId, field, value) => {
+    setGridRows(rows => rows.map(r => r.student_id === studentId ? { ...r, [field]: value } : r));
+  };
+
+  const calculateGridPromedio = (r) => {
+    const pn = ((parseFloat(r.preparacion_nota1) || 0) + (parseFloat(r.preparacion_nota2) || 0) + (parseFloat(r.preparacion_nota3) || 0)) / 3;
+    const en = ((parseFloat(r.ejecucion_nota1) || 0) + (parseFloat(r.ejecucion_nota2) || 0) + (parseFloat(r.ejecucion_nota3) || 0)) / 3;
+    const ev = ((parseFloat(r.evaluacion_nota1) || 0) + (parseFloat(r.evaluacion_nota2) || 0) + (parseFloat(r.evaluacion_nota3) || 0)) / 3;
+    return parseFloat((pn * 0.25 + en * 0.50 + ev * 0.25).toFixed(2));
+  };
+
+  const handleGridSave = async () => {
+    if (!gridReady) return;
+    const fields = [
+      'preparacion_nota1', 'preparacion_nota2', 'preparacion_nota3',
+      'ejecucion_nota1', 'ejecucion_nota2', 'ejecucion_nota3',
+      'evaluacion_nota1', 'evaluacion_nota2', 'evaluacion_nota3',
+    ];
+    const records = gridRows.map(r => {
+      const values = Object.fromEntries(fields.map(f => [f, r[f]]));
+      if (Object.values(values).every(v => v === '' || v === null || v === undefined)) return null;
+      return {
+        student_id: r.student_id,
+        subject_id: parseInt(selectedSubject),
+        academic_year_id: parseInt(selectedYear),
+        ...values,
+      };
+    }).filter(Boolean);
+    if (records.length === 0) {
+      alert('No hay notas para guardar');
+      return;
+    }
+    setGridSaving(true);
+    try {
+      const res = await API.post('/module-grades/batch', { registros: records });
+      alert(res.data.message);
+      await Promise.all([loadGrid(), loadGrades()]);
+    } catch (err) {
+      alert(err.response?.data?.message || 'Error al guardar las notas de módulo');
+    } finally {
+      setGridSaving(false);
     }
   };
 
@@ -152,15 +238,15 @@ export default function ModuleGrades() {
       </p>
 
       <div className="filters">
-        <select value={selectedYear} onChange={e => setSelectedYear(e.target.value)}>
+        <select value={selectedYear} onChange={e => { setSelectedYear(e.target.value); setGridRows([]); }}>
           <option value="">Seleccionar Año</option>
           {years.map(y => <option key={y.id} value={y.id}>{y.año}</option>)}
         </select>
-        <select value={selectedSubject} onChange={e => setSelectedSubject(e.target.value)} disabled={isTeacher && moduleSubjects.length === 0}>
+        <select value={selectedSubject} onChange={e => { setSelectedSubject(e.target.value); setGridRows([]); }} disabled={isTeacher && moduleSubjects.length === 0}>
           <option value="">{isTeacher ? 'Mis materias de módulo' : 'Seleccionar Materia de Módulo'}</option>
           {moduleSubjects.map(s => <option key={s.id} value={s.id}>{s.nombre}</option>)}
         </select>
-        <select value={selectedSection} onChange={e => setSelectedSection(e.target.value)} disabled={sections.length <= 1}>
+        <select value={selectedSection} onChange={e => { setSelectedSection(e.target.value); setGridRows([]); }} disabled={sections.length <= 1}>
           <option value="">{isTeacher ? 'Mis secciones' : 'Todas las secciones'}</option>
           {sections.map(s => <option key={s.id} value={s.id}>{s.nombre}</option>)}
         </select>
@@ -169,6 +255,95 @@ export default function ModuleGrades() {
           {students.map(s => <option key={s.id} value={s.id}>{s.nombre} {s.apellido}</option>)}
         </select>
         <button className="btn btn-primary" onClick={loadGrades}>Buscar</button>
+      </div>
+
+      <div className="card">
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.5rem' }}>
+          <h3 style={{ margin: 0 }}>Cuadrícula de notas de módulo</h3>
+          <div style={{ display: 'flex', gap: '0.5rem' }}>
+            <button className="btn btn-secondary" onClick={loadGrid} disabled={gridLoading || gridSaving}>
+              {gridLoading ? 'Cargando...' : 'Cargar cuadrícula'}
+            </button>
+            <button className="btn btn-primary" onClick={handleGridSave} disabled={gridSaving || gridLoading || gridRows.length === 0}>
+              {gridSaving ? 'Guardando...' : 'Guardar cuadrícula'}
+            </button>
+          </div>
+        </div>
+        {!gridReady ? (
+          <p style={{ color: 'var(--text-light)', marginTop: '0.5rem' }}>
+            Selecciona año académico, materia de módulo y sección, y presiona "Cargar cuadrícula" para editar las notas de todos los alumnos a la vez.
+          </p>
+        ) : (
+          <div className="table-container" style={{ marginTop: '0.75rem' }}>
+            {gridRows.length === 0 ? (
+              <div style={{ textAlign: 'center', color: 'var(--text-light)', padding: '1rem 0' }}>
+                {gridLoading ? 'Cargando alumnos...' : 'Sin alumnos en esta sección. Presiona "Cargar cuadrícula".'}
+              </div>
+            ) : (
+              <table>
+                <thead>
+                  <tr>
+                    <th>#</th>
+                    <th>Alumno</th>
+                    <th colSpan="3">Preparación (25%)</th>
+                    <th colSpan="3">Ejecución (50%)</th>
+                    <th colSpan="3">Evaluación (25%)</th>
+                    <th>Promedio</th>
+                    <th>Nivel</th>
+                  </tr>
+                  <tr>
+                    <th></th>
+                    <th></th>
+                    <th>N1</th>
+                    <th>N2</th>
+                    <th>N3</th>
+                    <th>N1</th>
+                    <th>N2</th>
+                    <th>N3</th>
+                    <th>N1</th>
+                    <th>N2</th>
+                    <th>N3</th>
+                    <th></th>
+                    <th></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {gridRows.map((row, i) => {
+                    const promedio = calculateGridPromedio(row);
+                    const nivel = calculateNivelPreview(promedio);
+                    const fields = [
+                      'preparacion_nota1', 'preparacion_nota2', 'preparacion_nota3',
+                      'ejecucion_nota1', 'ejecucion_nota2', 'ejecucion_nota3',
+                      'evaluacion_nota1', 'evaluacion_nota2', 'evaluacion_nota3',
+                    ];
+                    return (
+                      <tr key={row.student_id}>
+                        <td>{i + 1}</td>
+                        <td>{row.apellido} {row.nombre}</td>
+                        {fields.map(field => (
+                          <td key={field}>
+                            <input
+                              type="number"
+                              step="0.01"
+                              min="1"
+                              max="10"
+                              style={{ width: '4rem' }}
+                              aria-label={`${row.apellido} ${row.nombre} ${field}`}
+                              value={row[field]}
+                              onChange={e => handleCellChange(row.student_id, field, e.target.value)}
+                            />
+                          </td>
+                        ))}
+                        <td><strong>{promedio}</strong></td>
+                        <td><span className={`badge badge-nivel-${nivel}`}>{nivel}</span></td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            )}
+          </div>
+        )}
       </div>
 
       {editing && (

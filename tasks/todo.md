@@ -112,3 +112,38 @@ Spec: `SPEC-cuadricula-notas.md`
 - [x] Build y lint pasan.
 - [x] Revisión de calidad (code-review): aprobada.
 - [ ] Flujo end-to-end verificado manualmente sobre BD real (revisar la cuadrícula en el navegador).
+
+---
+
+# Cuadrícula de Carga Masiva de Notas de Módulo
+
+Spec: `SPEC-cuadricula-notas-modulo.md`
+
+## Phase 1: Backend - fórmula compartida
+
+- [x] Task A: Crear `backend/utils/moduleGradeAverage.js`
+  - Acceptance: exporta `computeModuleGrade` (promedio 25/50/25 + nivel de logro) igual a los cálculos actuales; `createOrUpdateModuleGrade` delega en el util.
+  - Verify: `npm test --prefix backend` pasa (16 tests).
+  - Files: `backend/utils/moduleGradeAverage.js`, `backend/utils/moduleGradeAverage.test.js`, `backend/controllers/moduleGrade.controller.js`
+
+## Phase 2: Backend - endpoint de lote
+
+- [x] Task B: Crear `createOrUpdateModuleGradesBatch` en `moduleGrade.controller.js` y ruta `POST /api/module-grades/batch`
+  - Acceptance: recibe `{ registros: [...] }`, ignora registros sin ningún valor en las 9 columnas, hace upsert por (student_id, subject_id, academic_year_id), calcula promedio/nivel con `computeModuleGrade`.
+  - Verify: 401 sin token; 400 si `registros` no es array; guardado verificado con curl sobre BD real (pendiente).
+  - Files: `backend/controllers/moduleGrade.controller.js`, `backend/routes/moduleGrade.routes.js`
+
+## Checkpoint: Backend
+- [x] Endpoint de lote responderá con roles correctos y upsert funciona (validado sintácticamente; curl sobre BD pendiente).
+
+## Phase 3: Frontend - cuadrícula editable
+
+- [x] Task C: Cuadrícula en `frontend/src/pages/ModuleGrades.jsx`
+  - Acceptance: al elegir año + materia de módulo + sección muestra todos los alumnos de la sección con 9 campos editables (pre-cargados si existen), promedio y nivel en vivo, botón Guardar en lote; los campos vacíos no envían cambios; el modo individual se conserva.
+  - Verify: `npm run build --prefix frontend` y `npm run lint --prefix frontend` sin errores; prueba visual/manual pendiente.
+  - Files: `frontend/src/pages/ModuleGrades.jsx`
+
+## Checkpoint: Completo
+- [x] Build y lint pasan.
+- [ ] Revisión de calidad (code-review).
+- [ ] Flujo end-to-end verificado manualmente sobre BD real (revisar la cuadrícula en el navegador).
